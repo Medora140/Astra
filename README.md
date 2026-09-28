@@ -30,16 +30,16 @@ The ASTRA routes live under `/api`; the original OCR service routes remain avail
 
 - Frontend: React 18, Vite, Lucide icons, responsive CSS.
 - Backend: FastAPI, Pydantic, `pdftext`, Requests.
-- Generation: Gemini and Groq for hosted chat with Ollama fallback; Ollama writes summaries and creates local embeddings.
+- Generation: Gemini and Groq for hosted chat with Ollama fallback; Ollama writes summaries when available, with an extractive local summary fallback.
 - Extraction: `pdftext` preserves page boundaries for citation. The existing Docling/Celery OCR service remains part of the repository, but scanned-PDF OCR is not yet wired into ASTRA uploads.
-- Retrieval: page-level Ollama `bge-m3` embeddings stored locally with the document record and ranked by cosine similarity. Keyword overlap is the fallback when the embedding model is unavailable. The persisted page vectors provide a lightweight local vector index without a separate vector database service.
+- Retrieval: page-level Ollama `bge-m3` embeddings stored locally with the document record and ranked by cosine similarity. Keyword overlap is the fallback when embedding is unavailable or times out. The persisted page vectors provide a lightweight local vector index without a separate vector database service.
 
 ## Setup
 
 ### Prerequisites
 
 - Python 3.10+ and Node.js 18+.
-- Ollama installed and running locally.
+- Ollama installed and running locally for generated summaries and semantic retrieval (optional; extractive summaries and keyword retrieval work without it).
 
 Pull the default answer model:
 

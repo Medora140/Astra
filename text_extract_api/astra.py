@@ -24,7 +24,8 @@ DB_FILE = DATA_DIR / "documents.json"
 OLLAMA = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 CHAT_MODEL = os.getenv("ASTRA_CHAT_MODEL", "llama3.1")
 EMBED_MODEL = os.getenv("ASTRA_EMBED_MODEL", "bge-m3")
-EMBED_TIMEOUT = float(os.getenv("ASTRA_EMBED_TIMEOUT_SECONDS", "30"))
+EMBED_TIMEOUT = float(os.getenv("ASTRA_EMBED_TIMEOUT_SECONDS", "20"))
+SUMMARY_TIMEOUT = float(os.getenv("ASTRA_SUMMARY_TIMEOUT_SECONDS", "30"))
 CHAT_PROVIDER = os.getenv("ASTRA_CHAT_PROVIDER", "auto").strip().lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -63,7 +64,23 @@ def _db() -> dict[str, Any]:
             _save(seeded)
         return seeded
     try:
-        return json.loads(DB_FILE.read_text(encoding="utf-8"))
+        db = json.loads(DB_FILE.read_text(encoding="utf-8"))
+        recovered = False
+        for item in db.values():
+            # Older uploads were marked failed only because local Ollama was down.
+            # Their extracted pages are still usable for summaries and cloud chat.
+            if item.get("status") == "error" and any(p.get("text", "").strip() for p in item.get("pages", [])):
+                item["status"] = "ready"
+                if not item.get("summary"):
+                    item["summary"] = _sample_summary(item["pages"])
+                if len(item.get("embeddings", [])) != len(item["pages"]):
+                    item["embeddings"] = []
+                    item["embedding_status"] = "unavailable"
+                item.pop("error", None)
+                recovered = True
+        if recovered:
+            _save(db)
+        return db
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -107,13 +124,13 @@ def _extract_pdf(content: bytes) -> list[dict[str, Any]]:
     return pages
 
 
-def _ollama(prompt: str, *, temperature: float = 0.1) -> str:
+def _ollama(prompt: str, *, temperature: float = 0.1, timeout: float = 180) -> str:
     try:
         response = requests.post(
             f"{OLLAMA}/api/generate",
             json={"model": CHAT_MODEL, "prompt": prompt, "stream": False,
                   "options": {"temperature": temperature}},
-            timeout=180,
+            timeout=timeout,
         )
         if response.status_code == 404:
             raise HTTPException(status_code=503, detail=f"Ollama model '{CHAT_MODEL}' is unavailable. Pull it with `ollama pull {CHAT_MODEL}`.")
@@ -199,24 +216,29 @@ def _summarize(doc_id: str) -> None:
     item = db.get(doc_id)
     if not item:
         return
+    context = "\n\n".join(f"[Page {p['page']}] {p['text']}" for p in item["pages"][:12])[:18000]
     try:
-        context = "\n\n".join(f"[Page {p['page']}] {p['text']}" for p in item["pages"][:12])[:18000]
-        item["summary"] = _ollama("Summarize the document below in 3 concise sentences. Use only its content.\n\n" + context)
-        # Persist vectors page-by-page so repeated questions use semantic retrieval locally.
-        for start in range(0, len(item["pages"]), 16):
-            batch = item["pages"][start:start + 16]
-            vectors = _embed([p["text"][:8000] for p in batch])
-            if len(vectors) != len(batch):
-                item["embeddings"] = []
-                item["embedding_status"] = "unavailable"
-                break
-            item.setdefault("embeddings", []).extend(vectors)
-        else:
-            item["embedding_status"] = "ready"
-        item["status"] = "ready"
-    except Exception as exc:
-        item["status"] = "error"
-        item["error"] = getattr(exc, "detail", str(exc))
+        item["summary"] = _ollama(
+            "Summarize the document below in 3 concise sentences. Use only its content.\n\n" + context,
+            timeout=SUMMARY_TIMEOUT,
+        )
+    except Exception:
+        # Ollama is optional for ingestion: retain a useful extractive summary.
+        item["summary"] = _sample_summary(item["pages"])
+
+    # Embeddings are an enhancement; failure should not block upload or cloud chat.
+    item["embeddings"] = []
+    item["embedding_status"] = "unavailable"
+    for start in range(0, len(item["pages"]), 16):
+        batch = item["pages"][start:start + 16]
+        vectors = _embed([p["text"][:8000] for p in batch])
+        if len(vectors) != len(batch):
+            break
+        item["embeddings"].extend(vectors)
+    else:
+        item["embedding_status"] = "ready"
+    item["status"] = "ready"
+    item.pop("error", None)
     db[doc_id] = item
     _save(db)
 
