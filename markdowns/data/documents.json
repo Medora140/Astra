@@ -1,0 +1,83 @@
+{
+  "autonomous_systems_unmanned_ground_vehicle": {
+    "doc_id": "autonomous_systems_unmanned_ground_vehicle",
+    "filename": "autonomous-systems-unmanned-ground-vehicle.pdf",
+    "title": "Unmanned ground vehicle - Wikipedia",
+    "source": "User Upload",
+    "pages": 15,
+    "chunk_count": 15,
+    "file_size_bytes": 962203,
+    "upload_timestamp": "2026-09-28T17:28:38.614072",
+    "summary": {
+      "executive_summary": "Technical operational document analyzing Unmanned ground vehicle - Wikipedia.",
+      "key_capabilities": [
+        "Mission deployment",
+        "Tactical operations"
+      ],
+      "tactical_domains": [
+        "Defence & Technology"
+      ],
+      "major_limitations": [
+        "Operational constraints"
+      ],
+      "key_entities": [
+        "Unmanned ground vehicle - Wikipedia"
+      ]
+    },
+    "is_sample": false
+  },
+  "defence_electronics_electronic_warfare": {
+    "doc_id": "defence_electronics_electronic_warfare",
+    "filename": "defence-electronics-electronic-warfare.pdf",
+    "title": "Electronic warfare",
+    "source": "Sample Starter",
+    "pages": 12,
+    "chunk_count": 12,
+    "file_size_bytes": 653507,
+    "upload_timestamp": "2026-09-28T16:44:27.156639",
+    "summary": {
+      "executive_summary": "Technical operational document analyzing Electronic warfare.",
+      "key_capabilities": [
+        "Mission deployment",
+        "Tactical operations"
+      ],
+      "tactical_domains": [
+        "Defence & Technology"
+      ],
+      "major_limitations": [
+        "Operational constraints"
+      ],
+      "key_entities": [
+        "Electronic warfare"
+      ]
+    },
+    "is_sample": true
+  },
+  "unmanned_aerial_vehicle_overview": {
+    "doc_id": "unmanned_aerial_vehicle_overview",
+    "filename": "unmanned-aerial-vehicle-overview.pdf",
+    "title": "Unmanned aerial vehicle",
+    "source": "Sample Starter",
+    "pages": 50,
+    "chunk_count": 50,
+    "file_size_bytes": 3218367,
+    "upload_timestamp": "2026-09-28T16:44:32.580254",
+    "summary": {
+      "executive_summary": "Technical operational document analyzing Unmanned aerial vehicle.",
+      "key_capabilities": [
+        "Mission deployment",
+        "Tactical operations"
+      ],
+      "tactical_domains": [
+        "Defence & Technology"
+      ],
+      "major_limitations": [
+        "Operational constraints"
+      ],
+      "key_entities": [
+        "Unmanned aerial vehicle"
+      ]
+    },
+    "is_sample": true
+  }
+}

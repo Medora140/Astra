@@ -1,3 +1,108 @@
+# ASTRA INTEL — Challenge 01
+
+ASTRA INTEL is a local-first document intelligence app for defence and technology reports. It combines the FastAPI service in this repository with a React interface to upload a PDF, extract page text, summarize it, and ask questions with page citations.
+
+## Features
+
+- PDF upload with corrupt, empty, unsupported, and oversized file handling.
+- Page-aware extraction and PDF source viewer.
+- Concise local-model summary and document-scoped Q&A.
+- Answers cite source pages and sections; unsupported questions return an explicit no-evidence response.
+- Multiple documents, visible conversation history, and local document persistence.
+- Included UAV, electronic warfare, and UGV sample PDFs.
+
+## Architecture and data flow
+
+```mermaid
+flowchart LR
+  UI[React + Vite] -->|PDF / questions| API[FastAPI ASTRA API]
+  API -->|PDF pages| EX[PyMuPDF extraction]
+  EX --> STORE[(Local JSON + PDF files)]
+  API -->|retrieved page excerpts| LLM[Ollama local model]
+  LLM -->|summary / grounded answer| UI
+  UI -->|page citation| PDF[Browser PDF viewer]
+```
+
+The ASTRA routes live under `/api`; the original OCR service routes remain available. For text-based PDFs the app extracts text page-by-page with PyMuPDF. Retrieval ranks pages by query term overlap, and only the best matching excerpts are sent to Ollama. No cloud LLM API key is used. Sample corpus page text and metadata are in `markdowns/data`; new uploads and the app document registry are stored under `data/`.
+
+## Tech stack and AI pipeline
+
+- Frontend: React 18, Vite, Lucide icons, responsive CSS.
+- Backend: FastAPI, Pydantic, `pdftext`, Requests.
+- Generation: Ollama with `llama3.1` by default. It writes summaries and answers from retrieved excerpts only.
+- Extraction: `pdftext` preserves page boundaries for citation. The existing Docling/Celery OCR service remains part of the repository, but scanned-PDF OCR is not yet wired into ASTRA uploads.
+- Retrieval: page-level Ollama `bge-m3` embeddings stored locally with the document record and ranked by cosine similarity. Keyword overlap is the fallback when the embedding model is unavailable. The persisted page vectors provide a lightweight local vector index without a separate vector database service.
+
+## Setup
+
+### Prerequisites
+
+- Python 3.10+ and Node.js 18+.
+- Ollama installed and running locally.
+
+Pull the default answer model:
+
+```bash
+ollama pull llama3.1
+  ollama pull bge-m3
+```
+
+Create a Python environment from the repository root (`text-extract-api`):
+
+```bash
+python -m venv .venv
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+# macOS / Linux: source .venv/bin/activate
+pip install -e .
+```
+
+Copy `.env.example` to `.env` and set `OLLAMA_HOST`, `ASTRA_CHAT_MODEL`, `ASTRA_EMBED_MODEL`, and optionally `ASTRA_DATA_DIR`. Defaults for local development are `http://localhost:11434`, `llama3.1`, `bge-m3`, and `./data`. No paid API key is required. If `bge-m3` is unavailable, ASTRA falls back to lexical page retrieval. Run the API:
+
+```bash
+uvicorn text_extract_api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+In another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Vite proxies `/api` calls to port 8000. The first visit seeds the three supplied sample documents from `markdowns/data/pages` and `markdowns/data/documents.json`.
+
+## API overview
+
+- `GET /api/health` — API and Ollama availability.
+- `GET /api/documents` — list documents.
+- `POST /api/documents` — multipart PDF upload.
+- `GET /api/documents/{id}` — processing state, summary, and page text.
+- `GET /api/documents/{id}/file` — source PDF.
+- `POST /api/documents/{id}/chat` — `{ "question": "...", "history": [] }`.
+- `DELETE /api/documents/{id}` — remove a document.
+
+## Example questions
+
+Try “What are the major applications discussed in this document?”, “What capabilities are described?”, and “What percentage of UAV missions are fully autonomous?” The last question should be answered as unsupported unless the retrieved source pages state a percentage.
+
+## Testing and known limitations
+
+No automated ASTRA-specific test suite has been added yet. Verify locally by starting Ollama, API, and frontend; opening a seeded sample; asking a supported question and an unsupported question; uploading a text PDF; and checking that citations navigate to their referenced page. The original extraction service has its own tests.
+
+Current limitations: scanned PDFs are rejected with an explanatory message; retrieval is page-granular; summaries use the first twelve pages; model output can still make mistakes despite the evidence-only prompt; conversation history is kept in the browser session and is not persisted. Very large PDFs may take time to summarize and embed.
+
+Future work: connect Docling OCR for scanned files, add Chroma for larger collections, persist conversations, add comparison across documents, and support section-level highlighting.
+
+## Dataset and attribution
+
+The sample PDFs are snapshots of Wikipedia articles under CC BY-SA 4.0. See [markdowns/README.md](markdowns/README.md) and the metadata in `markdowns/data/documents.json` for details and sources. Users may upload their own PDFs; uploaded files remain in the configured local data directory.
+
+## Existing extraction service
+
+The remainder of this README documents the underlying `text-extract-api` OCR service, its Celery/Redis setup, and its original endpoints.
+
 # text-extract-api
 
 Convert any image, PDF or Office document to Markdown *text* or JSON structured document with super-high accuracy, including tabular data, numbers or math formulas.

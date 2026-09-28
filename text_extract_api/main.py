@@ -29,6 +29,8 @@ def storage_profile_exists(profile_name: str) -> bool:
     return True
 
 app = FastAPI()
+from text_extract_api.astra import router as astra_router
+app.include_router(astra_router)
 # Connect to Redis
 redis_url = os.getenv('REDIS_CACHE_URL', 'redis://redis:6379/1')
 redis_client = redis.StrictRedis.from_url(redis_url)
