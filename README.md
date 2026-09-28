@@ -1,12 +1,12 @@
 # ASTRA INTEL — Challenge 01
 
-ASTRA INTEL is a local-first document intelligence app for defence and technology reports. It combines the FastAPI service in this repository with a React interface to upload a PDF, extract page text, summarize it, and ask questions with page citations.
+ASTRA INTEL is a document intelligence app for defence and technology reports. It combines the FastAPI service in this repository with a React interface to upload a PDF, extract page text, summarize it, and ask questions with page citations.
 
 ## Features
 
 - PDF upload with corrupt, empty, unsupported, and oversized file handling.
 - Page-aware extraction and PDF source viewer.
-- Concise local-model summary and document-scoped Q&A.
+- Concise summary and document-scoped Q&A, using selectable local or hosted chat models.
 - Answers cite source pages and sections; unsupported questions return an explicit no-evidence response.
 - Multiple documents, visible conversation history, and local document persistence.
 - Included UAV, electronic warfare, and UGV sample PDFs.
@@ -16,20 +16,21 @@ ASTRA INTEL is a local-first document intelligence app for defence and technolog
 ```mermaid
 flowchart LR
   UI[React + Vite] -->|PDF / questions| API[FastAPI ASTRA API]
-  API -->|PDF pages| EX[PyMuPDF extraction]
+  API -->|PDF pages| EX[pdftext extraction]
   EX --> STORE[(Local JSON + PDF files)]
-  API -->|retrieved page excerpts| LLM[Ollama local model]
-  LLM -->|summary / grounded answer| UI
+  API -->|retrieved excerpts + question| CHAT[Gemini / Groq / Ollama]
+  API -->|summary + local embeddings| OLLAMA[Ollama]
+  CHAT -->|grounded answer| UI
   UI -->|page citation| PDF[Browser PDF viewer]
 ```
 
-The ASTRA routes live under `/api`; the original OCR service routes remain available. For text-based PDFs the app extracts text page-by-page with PyMuPDF. Retrieval ranks pages by query term overlap, and only the best matching excerpts are sent to Ollama. No cloud LLM API key is used. Sample corpus page text and metadata are in `markdowns/data`; new uploads and the app document registry are stored under `data/`.
+The ASTRA routes live under `/api`; the original OCR service routes remain available. For text-based PDFs the app extracts text page-by-page with `pdftext`. Retrieval ranks pages using local `bge-m3` embeddings, with query-term overlap as a fallback. Summary generation and embeddings stay on local Ollama. Chat generation uses Gemini, then Groq, then local Ollama when `ASTRA_CHAT_PROVIDER=auto`. With Gemini or Groq selected, ASTRA sends the question and retrieved page excerpts to that provider; it does not upload the complete PDF for chat. Sample corpus page text and metadata are in `markdowns/data`; new uploads and the app document registry are stored under `data/`.
 
 ## Tech stack and AI pipeline
 
 - Frontend: React 18, Vite, Lucide icons, responsive CSS.
 - Backend: FastAPI, Pydantic, `pdftext`, Requests.
-- Generation: Ollama with `llama3.1` by default. It writes summaries and answers from retrieved excerpts only.
+- Generation: Gemini and Groq for hosted chat with Ollama fallback; Ollama writes summaries and creates local embeddings.
 - Extraction: `pdftext` preserves page boundaries for citation. The existing Docling/Celery OCR service remains part of the repository, but scanned-PDF OCR is not yet wired into ASTRA uploads.
 - Retrieval: page-level Ollama `bge-m3` embeddings stored locally with the document record and ranked by cosine similarity. Keyword overlap is the fallback when the embedding model is unavailable. The persisted page vectors provide a lightweight local vector index without a separate vector database service.
 
@@ -57,7 +58,7 @@ python -m venv .venv
 pip install -e .
 ```
 
-Copy `.env.example` to `.env` and set `OLLAMA_HOST`, `ASTRA_CHAT_MODEL`, `ASTRA_EMBED_MODEL`, and optionally `ASTRA_DATA_DIR`. Defaults for local development are `http://localhost:11434`, `llama3.1`, `bge-m3`, and `./data`. No paid API key is required. If `bge-m3` is unavailable, ASTRA falls back to lexical page retrieval. Run the API:
+Copy `.env.example` to `.env` and configure `OLLAMA_HOST`, `ASTRA_EMBED_MODEL`, and optionally `ASTRA_DATA_DIR`. Set `GEMINI_API_KEY` and/or `GROQ_API_KEY` for hosted chat. With `ASTRA_CHAT_PROVIDER=auto`, ASTRA tries Gemini, then Groq, then local Ollama. Set it to `gemini`, `groq`, or `ollama` to select a single chat provider. Model defaults are configurable with `GEMINI_MODEL` and `GROQ_MODEL`. Keep API keys in this backend `.env`; never add them to frontend variables or commit `.env`. If `bge-m3` is unavailable or times out, ASTRA falls back to lexical retrieval and remembers that indexing failed instead of retrying on every question. Run the API:
 
 ```bash
 uvicorn text_extract_api.main:app --reload --host 0.0.0.0 --port 8000

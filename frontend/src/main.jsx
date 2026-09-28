@@ -6,7 +6,13 @@ import './style.css';
 const api = async (url, options) => {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || 'Something went wrong.');
+  if (!response.ok) {
+    const detail = payload.detail;
+    const message = Array.isArray(detail)
+      ? detail.map(item => item.msg || JSON.stringify(item)).join('; ')
+      : typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Something went wrong.';
+    throw new Error(message);
+  }
   return payload;
 };
 
@@ -34,15 +40,16 @@ function App() {
   const ask = async (text = question) => {
     if (!text.trim() || !selected || busy) return;
     const next = [...messages, {role:'user', content:text.trim()}]; setMessages(next); setQuestion(''); setBusy(true); setError('');
-    try { const result = await api(`/api/documents/${selected}/chat`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:text.trim(), history:messages.slice(-6)})}); setMessages([...next, {role:'assistant', content:result.answer, sources:result.sources}]); }
+    try { const result = await api(`/api/documents/${selected}/chat`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:text.trim(), history:messages.slice(-6).map(({role,content})=>({role,content}))})}); setMessages([...next, {role:'assistant', content:result.answer, sources:result.sources}]); }
     catch(e) { setMessages(next); setError(e.message); } finally { setBusy(false); }
   };
   const remove = async (id, event) => { event.stopPropagation(); try { await api(`/api/documents/${id}`, {method:'DELETE'}); if(selected===id) {setSelected(null);setMessages([])} await refresh(); } catch(e){setError(e.message)} };
   const shownDocs = docs.filter(d => `${d.title} ${d.filename}`.toLowerCase().includes(query.toLowerCase()));
   const askSuggestions = ['What are the main applications?', 'Summarize the key capabilities', 'What limitations are mentioned?'];
+  const providerLabel = health?.gemini_configured ? (health?.groq_configured?'GEMINI · GROQ FALLBACK':'GEMINI API') : health?.groq_configured?'GROQ API':'LOCAL OLLAMA';
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><div className="brand-mark"><Radio size={18}/></div><span>ASTRA <b>INTEL</b></span><i>DOCUMENT INTELLIGENCE</i></div><div className="top-right"><div className={`system-status ${health?.ollama_available?'':'offline'}`}><span className="dot"/>{health?.ollama_available?'LOCAL SYSTEM ONLINE':'OLLAMA OFFLINE'}</div><div className="avatar">AI</div></div></header>
+    <header className="topbar"><div className="brand"><div className="brand-mark"><Radio size={18}/></div><span>ASTRA <b>INTEL</b></span><i>DOCUMENT INTELLIGENCE</i></div><div className="top-right"><div className={`system-status ${health?.chat_available?'':'offline'}`}><span className="dot"/>{health?.chat_available?'CHAT PROVIDER CONFIGURED':'CHAT PROVIDER OFFLINE'}</div><div className="avatar">AI</div></div></header>
     <div className="workspace">
       <aside className="sidebar">
         <div className="side-head"><div><span className="eyebrow">WORKSPACE</span><h2>Library <span>{docs.length.toString().padStart(2,'0')}</span></h2></div><button className="icon-button" title="Upload document" onClick={()=>inputRef.current?.click()}><Plus size={18}/></button><input ref={inputRef} hidden type="file" accept="application/pdf,.pdf" onChange={e=>upload(e.target.files?.[0])}/></div>
@@ -60,7 +67,7 @@ function App() {
         {error&&<div className="error-banner"><span>{error}</span><button onClick={()=>setError('')}><X size={15}/></button></div>}
         {!detail ? <section className="welcome"><div className="welcome-top"><div className="orb"><Activity size={28}/></div><span className="eyebrow">ASTRA INTEL · CHALLENGE 01</span><h2>Every document.<br/><em>Within reach.</em></h2><p>Upload a defence or technology report. Ask precise questions and trace every answer back to its page.</p><button className="primary-button" onClick={()=>inputRef.current?.click()} disabled={uploading}><Upload size={16}/>{uploading?'Processing document':'Upload a PDF'}<span>↗</span></button></div><div className="welcome-stats"><div><strong>01</strong><span>UPLOAD A REPORT</span></div><div><strong>02</strong><span>ASK IN PLAIN LANGUAGE</span></div><div><strong>03</strong><span>VERIFY PAGE SOURCES</span></div></div></section>
         : <div className="analysis-grid">
-          <section className="chat-panel"><div className="panel-heading"><div><span className="eyebrow">DOCUMENT ASSISTANT</span><h3><Sparkles size={16}/> Ask this document</h3></div><span className="model-tag"><span className="dot"/> LOCAL MODEL</span></div>
+          <section className="chat-panel"><div className="panel-heading"><div><span className="eyebrow">DOCUMENT ASSISTANT</span><h3><Sparkles size={16}/> Ask this document</h3></div><span className="model-tag"><span className="dot"/> {providerLabel}</span></div>
             <div className="conversation">{!messages.length&&<div className="intro-message"><div className="assistant-stamp"><Sparkles size={16}/></div><div><strong>Analysis ready</strong><p>{detail.status==='processing'?'Your document is being prepared…':'I can answer questions using this document and cite the pages behind each answer.'}</p></div></div>}
               {messages.map((m,i)=><div className={`message ${m.role}`} key={i}>{m.role==='assistant'&&<div className="assistant-stamp"><Sparkles size={15}/></div>}<div className="message-body"><p>{m.content}</p>{m.sources?.length>0&&<div className="sources"><span>REFERENCES</span>{m.sources.map((s,j)=><button key={j} onClick={()=>setPage(s.page)}><FileText size={12}/>{s.section} <b>p. {s.page}</b></button>)}</div>}</div></div>)}
               {busy&&<div className="message assistant"><div className="assistant-stamp"><Sparkles size={15}/></div><div className="thinking"><i/><i/><i/><span>Reading document context…</span></div></div>}<div ref={endRef}/>
