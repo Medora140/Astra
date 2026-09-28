@@ -14,7 +14,8 @@ class DoclingStrategy(Strategy):
     Extraction strategy for processing PDF documents using Docling.
     """
 
-    def name(self) -> str:
+    @classmethod
+    def name(cls) -> str:
         return "docling"
 
     def extract_text(

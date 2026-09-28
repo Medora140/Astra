@@ -37,7 +37,7 @@ class LocalFilesystemStorageStrategy(StorageStrategy):
         file_name = self.format_file_name(file_name, dest_file_name)
         path = self._sanitize_and_resolve(file_name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w') as file:
+        with open(path, 'w', encoding="utf-8") as file:
             file.write(content)
 
     def load(self, file_name):
