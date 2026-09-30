@@ -31,6 +31,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 _WORD = re.compile(r"[a-zA-Z0-9]{2,}")
 
 
@@ -165,15 +166,22 @@ def _groq_generate(prompt: str) -> str:
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
         json={"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}],
-              "temperature": 0.1},
+              "temperature": 0.1, "reasoning_effort": "low", "max_completion_tokens": 1024},
         timeout=60,
     )
     if not response.ok:
         raise RuntimeError(f"Groq API returned HTTP {response.status_code}.")
-    answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+    choice = response.json().get("choices", [{}])[0]
+    content = choice.get("message", {}).get("content", "")
+    if isinstance(content, list):
+        answer = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    else:
+        answer = content if isinstance(content, str) else ""
+    answer = answer.strip()
     if not answer:
-        raise RuntimeError("Groq returned no answer text.")
-    return answer.strip()
+        finish_reason = choice.get("finish_reason") or "unknown"
+        raise RuntimeError(f"Groq returned no answer text (finish reason: {finish_reason}).")
+    return answer
 
 
 def _chat_generate(prompt: str) -> str:
@@ -184,7 +192,8 @@ def _chat_generate(prompt: str) -> str:
         "ollama": ("configured", lambda text: _ollama(text, temperature=0.1)),
     }
     if CHAT_PROVIDER == "auto":
-        order = [name for name in ("gemini", "groq", "ollama") if providers[name][0]]
+        # Prefer Groq for lower-latency chat; Gemini and local Ollama remain fallbacks.
+        order = [name for name in ("groq", "gemini", "ollama") if providers[name][0]]
     elif CHAT_PROVIDER in providers:
         if not providers[CHAT_PROVIDER][0]:
             raise HTTPException(status_code=503, detail=f"Chat provider '{CHAT_PROVIDER}' has no configured API key/model.")
@@ -294,7 +303,42 @@ def health():
             "chat_available": cloud_available or ollama_ok,
             "chat_provider": CHAT_PROVIDER,
             "gemini_configured": bool(GEMINI_API_KEY),
-            "groq_configured": bool(GROQ_API_KEY)}
+            "groq_configured": bool(GROQ_API_KEY),
+            "speech_available": bool(GROQ_API_KEY)}
+
+
+@router.post("/speech/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe browser-recorded audio with Groq; the API key remains server-side."""
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=503, detail="Speech-to-text needs GROQ_API_KEY in the backend .env file.")
+    filename = Path(file.filename or "recording.webm").name
+    content = await file.read(25 * 1024 * 1024 + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="The recording is empty. Try recording again.")
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="The recording exceeds the 25 MB speech upload limit.")
+    mime = (file.content_type or "audio/webm").split(";")[0]
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            files={"file": (filename, content, mime)},
+            data={"model": GROQ_STT_MODEL, "response_format": "json"},
+            timeout=90,
+        )
+        if not response.ok:
+            raise HTTPException(status_code=502, detail=f"Speech transcription provider returned HTTP {response.status_code}.")
+        transcript = response.json().get("text", "").strip()
+    except requests.Timeout as exc:
+        raise HTTPException(status_code=504, detail="Speech transcription timed out. Try a shorter recording.") from exc
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail="Could not reach the speech transcription provider.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Speech provider returned an unreadable response.") from exc
+    if not transcript:
+        raise HTTPException(status_code=422, detail="No speech was detected. Try speaking a little closer to the microphone.")
+    return {"text": transcript}
 
 
 @router.get("/documents")

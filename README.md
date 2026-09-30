@@ -19,6 +19,7 @@ Defence and technology teams work with long reports, research papers, articles, 
 - Ground answers in retrieved passages and return page and section citations.
 - Reply that the document does not contain the answer when no relevant passage is found.
 - Show conversation history for the current browser session.
+- Record spoken questions and transcribe them into the composer for review.
 - Handle empty, corrupt, oversized, unsupported, and text-empty PDFs with error messages.
 
 ### Additional
@@ -37,7 +38,7 @@ Defence and technology teams work with long reports, research papers, articles, 
 | PDF extraction | `pdftext` | Extract text while preserving PDF page boundaries |
 | Local generation | Ollama, `llama3.1` by default | Summary generation and optional local chat |
 | Local embeddings | Ollama, `bge-m3` by default | Page and question vectors for semantic retrieval |
-| Hosted chat | Gemini API and Groq API | Generate answers from the retrieved excerpts |
+| Hosted chat and speech transcription | Gemini API and Groq API | Generate answers and transcribe spoken questions |
 | Storage | Local PDF files and JSON metadata | Persist documents, extracted pages, summaries, and embeddings |
 
 ASTRA does not use ChromaDB or a SQL database in this version. Page vectors are saved in the local JSON document registry.
@@ -82,13 +83,19 @@ Retrieval is page-level. It returns up to five pages with matching terms or embe
 
 ### Chat providers
 
-`ASTRA_CHAT_PROVIDER=auto` tries Gemini first, then Groq, then local Ollama. Set `ASTRA_CHAT_PROVIDER` to `gemini`, `groq`, or `ollama` to use a single provider. Defaults are `gemini-3.8-flash` for Gemini and `openai/gpt-oss-20b` for Groq; set `GEMINI_MODEL` or `GROQ_MODEL` to change them.
+`ASTRA_CHAT_PROVIDER=auto` tries Groq first, then Gemini, then local Ollama. Set `ASTRA_CHAT_PROVIDER` to `gemini`, `groq`, or `ollama` to use a single provider. Defaults are `gemini-3.8-flash` for Gemini and `openai/gpt-oss-20b` for Groq; set `GEMINI_MODEL` or `GROQ_MODEL` to change them. Groq chat uses low reasoning effort to prioritize concise answers and reduce latency.
 
 The prompt instructs the model to answer only from the retrieved excerpts, ignore instructions found inside document text, and state when the excerpts do not support an answer. This reduces unsupported responses but cannot guarantee that every model answer is correct.
 
+### Speech-to-text
+
+Voice input uses Groq's audio transcription API, configured by `GROQ_API_KEY`, with `whisper-large-v3-turbo` by default. Change the model with `GROQ_STT_MODEL`. The browser records microphone audio and the backend proxies the request, keeping the API key out of the frontend. Transcribed text appears in the composer for editing and is not submitted automatically. Microphone use requires browser permission and a secure context (localhost is supported).
+
+NeMo Speech was not installed into this application's environment: the existing environment uses Python 3.10 and CPU-only PyTorch, while the Python NeMo Speech package requires Python 3.12+ and PyTorch 2.7+. Upgrading those core dependencies would risk breaking the existing PDF service. Groq's hosted audio endpoints add speech features without changing the Python/PyTorch stack. A separate isolated NeMo service can be evaluated later if local speech processing is needed and compatible hardware is available.
+
 ### Privacy
 
-PDFs and document records are stored under the local `data/` directory by default. Local extraction, summaries, and embeddings remain on the machine. If Gemini or Groq is used for chat, ASTRA sends the user's question, recent conversation text, and retrieved page excerpts to that provider. Do not use hosted chat with documents that you are not permitted to send to an external service. Keep API keys in the backend `.env` file; never place them in the frontend or commit them.
+PDFs and document records are stored under the local `data/` directory by default. Local extraction, summaries, and embeddings remain on the machine. If Gemini or Groq is used for chat, ASTRA sends the user's question, recent conversation text, and retrieved page excerpts to that provider. Voice recordings are sent to Groq for transcription. Do not use hosted services with documents or audio that you are not permitted to send externally. Keep API keys in the backend `.env` file; never place them in the frontend or commit them.
 
 ## Project layout
 
@@ -159,6 +166,7 @@ Configure the relevant values in `.env`:
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini chat model |
 | `GROQ_API_KEY` | unset | Groq API key; keep private |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq chat model |
+| `GROQ_STT_MODEL` | `whisper-large-v3-turbo` | Groq speech-to-text model |
 | `OLLAMA_HOST` | `http://localhost:11434` for native runs | Local Ollama service URL |
 | `ASTRA_CHAT_MODEL` | `llama3.1` | Local summary and Ollama chat model |
 | `ASTRA_EMBED_MODEL` | `bge-m3` | Local embedding model |
@@ -166,7 +174,7 @@ Configure the relevant values in `.env`:
 | `ASTRA_SUMMARY_TIMEOUT_SECONDS` | `30` | Maximum time for local summary generation before extractive fallback |
 | `ASTRA_DATA_DIR` | `./data` | Directory for uploaded PDFs and document registry |
 
-The API reads `.env` on the backend. Restart the API after changing these settings.
+The API reads `.env` on the backend. Restart the API after changing these settings. Voice input and output require `GROQ_API_KEY` even when Gemini is selected for chat.
 
 ### 3. Start the API
 
@@ -206,6 +214,7 @@ All ASTRA routes are under `/api`.
 | `GET` | `/api/documents/{document_id}` | Returns document details, summary, and page text |
 | `GET` | `/api/documents/{document_id}/file` | Serves the stored PDF for the viewer |
 | `POST` | `/api/documents/{document_id}/chat` | Asks a question about that document |
+| `POST` | `/api/speech/transcribe` | Transcribes multipart audio (`file`) using Groq |
 | `DELETE` | `/api/documents/{document_id}` | Deletes its local record and uploaded PDF |
 
 Chat request example:
